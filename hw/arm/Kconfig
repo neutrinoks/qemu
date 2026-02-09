@@ -699,3 +699,9 @@ config ARMSSE
     select UNIMP
     select SSE_COUNTER
     select SSE_TIMER
+
+config RK3399
+    bool
+    default y
+    depends on AARCH64
+    depends on TCG
