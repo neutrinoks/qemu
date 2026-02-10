@@ -705,3 +705,5 @@ config RK3399
     default y
     depends on AARCH64
     depends on TCG
+    select ARM_GIC
+    select SERIAL_MM
