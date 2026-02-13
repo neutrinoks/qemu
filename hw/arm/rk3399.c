@@ -10,6 +10,7 @@
 #include "qemu/units.h"
 #include "qapi/error.h"
 #include "hw/arm/rk3399.h"
+#include "hw/arm/rk3399_bootrom.h"
 #include "hw/arm/boot.h"
 #include "hw/arm/machines-qom.h"
 #include "hw/char/serial-mm.h"
@@ -79,6 +80,8 @@ static void rk3399_realize(DeviceState *dev, Error **errp)
     };
 
     /* ---- CPU ---- */
+    /* Set the ARM Generic Timer frequency to 24MHz (standard for RK3399) */
+    object_property_set_uint(OBJECT(&s->cpu), "cntfrq", 24000000, &error_abort);
     if (!qdev_realize(cpudev, NULL, errp)) {
         return;
     }
@@ -214,22 +217,10 @@ static void rk3399_machine_init(MachineState *machine)
      * On the real RK3399, physical addresses 0xF800_0000..0xFFFF_FFFF
      * are reserved for MMIO (peripherals, SRAM, BootROM, GIC).
      * DDR below this hole can be at most ~3968 MiB (0xF800_0000 bytes).
-     *
-     * If the user requests more via -m, we silently clamp to avoid
-     * overlap with the MMIO region.  A proper high-memory (>4 GiB)
-     * implementation would require an additional DDR region above
-     * 0x1_0000_0000, which is not modeled here.
      */
     if (machine->ram_size > RK3399_RAM_MAX_LOW) {
         machine->ram_size = RK3399_RAM_MAX_LOW;
     }
-
-    boot_info = (struct arm_boot_info) {
-        .loader_start = RK3399_INTMEM0_BASE,
-        .board_id = -1,
-        .ram_size = machine->ram_size,
-        .psci_conduit = QEMU_PSCI_CONDUIT_SMC,
-    };
 
     s = RK3399(object_new(TYPE_RK3399));
     object_property_add_child(OBJECT(machine), "soc", OBJECT(s));
@@ -238,7 +229,36 @@ static void rk3399_machine_init(MachineState *machine)
     memory_region_add_subregion(get_system_memory(), RK3399_RAM_START,
                                 machine->ram);
 
-    arm_load_kernel(&s->cpu, machine, &boot_info);
+    /*
+     * Boot sequence — emulates the real RK3399 BootROM behaviour:
+     *
+     *   1. Try to find a valid Rockchip ID block on eMMC or SD
+     *      (provided via -drive if=none,id=emmc / -drive if=none,id=sd).
+     *      If found: RC4-decrypt header, load TPL into INTMEM0 SRAM,
+     *      set PC to SRAM entry point.
+     *
+     *   2. If no bootable medium is found, fall back to QEMU's standard
+     *      -kernel boot path (ELF/binary loader via arm_load_kernel).
+     *      This path uses loader_start = INTMEM0_BASE, allowing bare-metal
+     *      binaries to be loaded directly into SRAM.
+     */
+    if (!rk3399_bootrom_load(&s->cpu, machine)) {
+        /*
+         * No bootable drive found — use -kernel fallback.
+         *
+         * On real hardware, the BootROM would enter USB gadget mode
+         * (MaskROM) at this point.  We don't emulate that yet and
+         * instead use QEMU's built-in kernel loader.
+         */
+        boot_info = (struct arm_boot_info) {
+            .loader_start = RK3399_INTMEM0_BASE,
+            .board_id = -1,
+            .ram_size = machine->ram_size,
+            .psci_conduit = QEMU_PSCI_CONDUIT_SMC,
+        };
+
+        arm_load_kernel(&s->cpu, machine, &boot_info);
+    }
 }
 
 static void rk3399_machine_class_init(MachineClass *mc)
