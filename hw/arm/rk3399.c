@@ -2,7 +2,6 @@
  * Rockchip RK3399 SoC.
  *
  * Copyright (c) 2026 Neutrinoks <mail@neutrinoks.io>.
- *
  */
 
 #include "qemu/osdep.h"
@@ -57,6 +56,15 @@ static void rk3399_init(Object *obj)
     object_initialize_child(obj, "cpu", &s->cpu,
                             ARM_CPU_TYPE_NAME("cortex-a53"));
     object_initialize_child(obj, "gic", &s->gic, gicv3_class_name());
+
+    object_initialize_child(obj, "cru", &s->cru, TYPE_RK3399_CRU);
+    object_initialize_child(obj, "pmucru", &s->pmucru, TYPE_RK3399_PMUCRU);
+
+    object_initialize_child(obj, "grf", &s->grf, TYPE_RK3399_GRF);
+    object_initialize_child(obj, "pmugrf", &s->pmugrf, TYPE_RK3399_GRF);
+    object_initialize_child(obj, "pmusgrf", &s->pmusgrf, TYPE_RK3399_GRF);
+
+    object_initialize_child(obj, "ddr", &s->ddr, TYPE_RK3399_DDR);
 }
 
 static void rk3399_realize(DeviceState *dev, Error **errp)
@@ -65,6 +73,7 @@ static void rk3399_realize(DeviceState *dev, Error **errp)
     DeviceState *cpudev = DEVICE(&s->cpu);
     DeviceState *gicdev = DEVICE(&s->gic);
     SysBusDevice *gicbusdev = SYS_BUS_DEVICE(&s->gic);
+    SysBusDevice *ddrbus;
     QList *redist_region_count;
     int i;
 
@@ -111,6 +120,73 @@ static void rk3399_realize(DeviceState *dev, Error **errp)
                            RK3399_INTMEM1_SIZE, &error_fatal);
     memory_region_add_subregion(get_system_memory(),
                                 RK3399_INTMEM1_BASE, &s->intmem1);
+
+    /* ---- CRU (Clock & Reset Unit) ---- */
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->cru), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->cru), 0, RK3399_CRU_BASE);
+
+    /* ---- PMUCRU ---- */
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->pmucru), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pmucru), 0, RK3399_PMUCRU_BASE);
+
+    /* ---- GRF (General Register Files) ---- */
+
+    qdev_prop_set_uint32(DEVICE(&s->grf), "num-regs",
+                         RK3399_GRF_SIZE / sizeof(uint32_t));
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->grf), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->grf), 0, RK3399_GRF_BASE);
+
+    /* ---- PMUGRF ---- */
+
+    qdev_prop_set_uint32(DEVICE(&s->pmugrf), "num-regs",
+                         RK3399_PMUGRF_SIZE / sizeof(uint32_t));
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->pmugrf), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pmugrf), 0, RK3399_PMUGRF_BASE);
+
+    /* ---- PMUSGRF ---- */
+
+    qdev_prop_set_uint32(DEVICE(&s->pmusgrf), "num-regs",
+                         RK3399_PMUSGRF_SIZE / sizeof(uint32_t));
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->pmusgrf), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pmusgrf), 0, RK3399_PMUSGRF_BASE);
+
+    /*
+     * ---- DDR Memory Subsystem ----
+     *
+     * Single device covering both DDR channels (PCTL, PI, PHY, MSCH)
+     * plus the shared CIC.  The MemoryRegions are created in the
+     * device's instance_init; we map them to their physical addresses
+     * here.
+     *
+     * MMIO region order (as registered by rk3399_ddr_init):
+     *   0: pctl0   1: pi0   2: phy0   3: msch0
+     *   4: pctl1   5: pi1   6: phy1   7: msch1
+     *   8: cic
+     */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->ddr), errp)) {
+        return;
+    }
+
+    ddrbus = SYS_BUS_DEVICE(&s->ddr);
+    for (i = 0; i < RK3399_DDR_NUM_CHANNELS; i++) {
+        sysbus_mmio_map(ddrbus, i * 4 + 0, RK3399_DDR_PCTL_BASE(i));
+        sysbus_mmio_map(ddrbus, i * 4 + 1, RK3399_DDR_PI_BASE(i));
+        sysbus_mmio_map(ddrbus, i * 4 + 2, RK3399_DDR_PHY_BASE(i));
+        sysbus_mmio_map(ddrbus, i * 4 + 3, RK3399_DDR_MSCH_BASE(i));
+    }
+    sysbus_mmio_map(ddrbus, 8, RK3399_DDR_CIC_BASE);
 
     /* ---- GICv3 (GIC-500) ---- */
 

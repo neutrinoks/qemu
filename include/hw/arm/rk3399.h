@@ -2,7 +2,6 @@
  * Rockchip RK3399 SoC.
  *
  * Copyright (c) 2026 Neutrinoks <mail@neutrinoks.io>.
- *
  */
 
 #ifndef HW_ARM_RK3399_SOC_H
@@ -14,6 +13,9 @@
 #include "hw/misc/unimp.h"
 #include "target/arm/cpu.h"
 #include "target/arm/cpu-qom.h"
+#include "hw/arm/rk3399_cru.h"
+#include "hw/arm/rk3399_grf.h"
+#include "hw/arm/rk3399_ddr.h"
 
 #define TYPE_RK3399 "rk3399"
 
@@ -141,6 +143,15 @@ struct Rk3399State {
 
     MemoryRegion intmem0;
     MemoryRegion intmem1;
+
+    Rk3399CruState cru;
+    Rk3399PmuCruState pmucru;
+
+    Rk3399GrfState grf;
+    Rk3399GrfState pmugrf;
+    Rk3399GrfState pmusgrf;
+
+    Rk3399DdrState ddr;
 };
 
 #endif
